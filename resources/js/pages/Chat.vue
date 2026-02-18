@@ -16,6 +16,13 @@ const addMessage = (role, content, sources = []) => {
     messages.value.push({ role, content, sources })
 }
 
+const addMessageResponse = (role, response) => {
+    messages.value.push({
+        ...{role: role},
+        ...response
+    })
+}
+
 const sendMessage = async () => {
     const msg = userInput.value.trim()
     if (!msg) return
@@ -23,8 +30,8 @@ const sendMessage = async () => {
     userInput.value = ''
     isLoading.value = true
     try {
-        const response = await axios.post('/chat', { message: msg })
-        addMessage('agent', response.data.text, response.data.sources)
+        const response = await axios.post('/chat', { message: msg, useAgent: 1 })
+        addMessageResponse('agent', response.data);
     } catch (err) {
         addMessage('agent', `Error: ${err.response?.data?.error || err.message}`)
     } finally {

@@ -2,10 +2,14 @@
 
 namespace App\Http\Controllers\Ai;
 
+
+use App\Ai\Agents\TcgAssitant;
 use App\Http\Controllers\Controller;
 use App\Models\UploadedFile;
+use App\Models\User;
 use Exception;
 use FastVolt\Helper\Markdown;
+use Laravel\Ai\Enums\Lab;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -46,51 +50,79 @@ class ChatController extends Controller
     {
         $request->validate([
             'message' => 'required|string|max:2000',
+            'useAgent' => 'boolean',
+            'useFileSearch' => 'boolean',
         ]);
-        try {
-            $file = UploadedFile::where('provider', 'gemini')
-                ->where('key', 'posts')
-                ->first();
-            $client = Gemini::client(config('services.gemini.key'));
-            $response = $client
-                ->generativeModel(model: config('services.gemini.model'))
-                ->withTool(new Tool(
-                    fileSearch: new FileSearch([
-                        $file->provider_id,
-                    ]) 
-                ))
-                ->withGenerationConfig(new GenerationConfig(
-                    temperature: 1,
-                    maxOutputTokens: 2048,
-                ))
-                ->generateContent(preg_replace(
-                    ['/:role/', '/:question/'],
-                    [config('chatbot.role'), $request->message],
-                    config('chatbot.prompts.base')
-                ));
-            // Extract sources / grounding chunks
-            $sources = [];
-            if (!empty($response->candidates[0]->groundingMetadata->groundingChunks)) {
-                foreach ($response->candidates[0]->groundingMetadata->groundingChunks as $chunk) {
-                    $fileInfo = $chunk->file ?? $chunk->retrievedContext ?? (object)[];
-                    $sources[] = [
-                        'file'       => $fileInfo->displayName ?? $fileInfo->uri ?? 'Workshop database',
-                        'confidence' => $chunk->confidence ?? null,
-                    ];
+        if ($request->useAgent) {
+            $me = User::me();
+            return response()->json(
+                (new TcgAssitant(
+                    user: $me,
+                    language: 'Spanish',
+                ))->prompt(
+                    $request->message,
+                    provider: Lab::Gemini,
+                    model: config('services.gemini.model'),
+                )
+            );
+        } else {
+            try {
+                $file = UploadedFile::where('provider', 'gemini')
+                    ->where('key', 'posts')
+                    ->first();
+                $client = Gemini::client(config('services.gemini.key'));
+                $response = $request->useFileSearch
+                    ? $client
+                        ->generativeModel(model: config('services.gemini.model'))
+                        ->withTool(new Tool(
+                            fileSearch: new FileSearch([
+                                $file->provider_id,
+                            ])
+                        ))
+                        ->withGenerationConfig(new GenerationConfig(
+                            temperature: 1,
+                            maxOutputTokens: 2048,
+                        ))
+                        ->generateContent(preg_replace(
+                            ['/:role/', '/:question/'],
+                            [config('chatbot.role'), $request->message],
+                            config('chatbot.prompts.base')
+                        ))
+                    : $client
+                        ->generativeModel(model: config('services.gemini.model'))
+                        ->withGenerationConfig(new GenerationConfig(
+                            temperature: 1,
+                            maxOutputTokens: 2048,
+                        ))
+                        ->generateContent(preg_replace(
+                            ['/:role/', '/:question/'],
+                            [config('chatbot.role'), $request->message],
+                            config('chatbot.prompts.base')
+                        ));
+                // Extract sources / grounding chunks
+                $sources = [];
+                if (!empty($response->candidates[0]->groundingMetadata->groundingChunks)) {
+                    foreach ($response->candidates[0]->groundingMetadata->groundingChunks as $chunk) {
+                        $fileInfo = $chunk->file ?? $chunk->retrievedContext ?? (object)[];
+                        $sources[] = [
+                            'file'       => $fileInfo->displayName ?? $fileInfo->uri ?? 'Workshop database',
+                            'confidence' => $chunk->confidence ?? null,
+                        ];
+                    }
                 }
+                $markdown = new Markdown();
+                return response()->json([
+                    'text' => $response->text()
+                        ? $markdown->setContent($response->text())->getHtml()
+                        : 'No response',
+                    'sources' => $sources,
+                ]);
+            } catch (Exception $e) {
+                Log::error('Gemini error: ' . $e->getMessage());
+                return response()->json([
+                    'error' => 'Failed to get response: ' . $e->getMessage()
+                ], 500);
             }
-            $markdown = new Markdown();
-            return response()->json([
-                'text' => $response->text()
-                    ? $markdown->setContent($response->text())->getHtml()
-                    : 'No response',
-                'sources' => $sources,
-            ]);
-        } catch (Exception $e) {
-            Log::error('Gemini error: ' . $e->getMessage());
-            return response()->json([
-                'error' => 'Failed to get response: ' . $e->getMessage()
-            ], 500);
         }
     }
 }

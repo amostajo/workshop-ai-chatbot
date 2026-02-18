@@ -43,7 +43,7 @@
         <div class="mb-2">
             <strong>{{ message.role === 'user' ? 'You' : (role || 'Aegent') }}:</strong>
         </div>
-        <div class="text-sm" style="white-space: pre-wrap;" v-html="message.content"/>
+        <div class="text-sm" style="white-space: pre-wrap;" v-html="message.content || message.text"/>
         <div v-if="message.sources?.length" class="sources mt-4">
             <small class="text-gray-400">Sources used:</small>
             <div>

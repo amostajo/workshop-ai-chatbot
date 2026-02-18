@@ -49,4 +49,10 @@ class User extends Authenticatable
             'two_factor_confirmed_at' => 'datetime',
         ];
     }
+
+    public function scopeMe($query)
+    {
+        return $query->where('email', 'you@testing.test')->first();
+    }
+
 }
